@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
+#include "timespeclib.h"
 
 int isTimeZero(struct timespec t1){
 	if (t1.tv_sec == 0 && t1.tv_nsec == 0) return 1;
@@ -9,8 +10,8 @@ int isTimeZero(struct timespec t1){
 
 struct timespec zeroTimeSpec(){
 	struct timespec temp;
-	temp->tv_sec = 0;
-	temp->tv_nsec = 0;
+	temp.tv_sec = 0;
+	temp.tv_nsec = 0;
 	return temp;
 }
 
@@ -37,8 +38,8 @@ struct timespec divTimeSpecByInt(struct timespec dividend, int divisor){
 
 void plusEqualsTimeSpecs(struct timespec* t1, struct timespec t2){
 
-	t1->tv_sec = t1->tv_sec + t2->tv_sec;
-	t1->tv_nsec = t1->tv_nsec + t2->tv_nsec;
+	t1->tv_sec = t1->tv_sec + t2.tv_sec;
+	t1->tv_nsec = t1->tv_nsec + t2.tv_nsec;
 
 	if(t1->tv_nsec >= BILLION){
 		t1->tv_nsec -= BILLION;
@@ -59,14 +60,14 @@ void minusEqualsTimeSpecs(struct timespec* t1, struct timespec* t2){
 	return;
 }
 
-void addLongToTimespec(long l, struct timespec* t1){
+struct timespec addLongToTimespec(long l, struct timespec* t1){
 	t1->tv_nsec = t1->tv_nsec + l;
 
 	if(t1->tv_nsec >= BILLION){
 		t1->tv_nsec -= BILLION;
 		(t1->tv_sec)++;
 	}
-	return;
+	return *t1;
 }
 
 int cmp_timespecs(struct timespec t1, struct timespec t2){

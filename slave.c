@@ -1,4 +1,5 @@
-/* Written by Jamy Spencer 23 Feb 2017 */
+/* Written by Jamy Spencer 01 Apr 2017 */
+#include <semaphore.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -10,10 +11,11 @@
 #include <sys/msg.h>
 #include <sys/types.h>
 #include "obj.h"
+#include "timespeclib.h"
 
 #define MAX_TIME_NEXT_TERM_CHECK 2500
 
-While the user processes are not actually doing anything, they will be asking for resources at random times.
+/*While the user processes are not actually doing anything, they will be asking for rsrc_table at random times.
 You should have a parameter giving a bound for when a process should request/let go of a resource. 
 
 Each process when it starts
@@ -22,18 +24,23 @@ a resource that it already has. It should make this request by putting a request
 checking to see if it is granted that resource.
 
 At random times (between 0 and 250ms), the process checks if it should terminate successfully. If so, it should deallocate all
-the resources allocated to it by communicating to master that it is releasing all those resources. Make sure that this probability
+the rsrc_table allocated to it by communicating to master that it is releasing all those rsrc_table. Make sure that this probability
 to terminate is low enough that churn happens in your system.
-
+*/
+int is_terminating ();
 
 int main ( int argc, char *argv[] ){
+	int max_time_next_rsrc_op;
+	int i, r, success;
 
+	pid_t my_pid= getpid();
+	int check;
 	//handle args or shutdown with error msg
 	if (argc < 2){
 		perror("Error: User process received too few arguments");
 		return 1;
 	}else{
-		int max_time_next_rsrc_op = atoi(argv[1]);
+		max_time_next_rsrc_op = atoi(argv[1]);
 	}
 
 	int doing_it = GO;
@@ -43,13 +50,20 @@ int main ( int argc, char *argv[] ){
 	//get shared memory
 	int shmid[2];
 	struct timespec* clock;
-	resource_t* resources;
-	shrMemMakeAttach(shmid[], &resources, &clock);
+	struct alloc_table_t* a_table;
+	shrMemMakeAttach(shmid, &a_table, &clock);
+	for (i = 0; i < MAX_USERS; i++){
+		if (a_table->)
+	}
+
+	//get the vector for this pid
+	for (i = 0; i < MAX_USERS; i++){
+		if (a_table->table[i])
+	}
 
 	//initialize semaphores
-	int clk_sem_key, rsrc_sem_key;
-	int clk_sem_id, rsrc_sem_id;
-	initializeSemaphore(&clk_sem_key, &rsrc_sem_key, &clk_sem_id, &rsrc_sem_id);
+	sem_t *clk_sem = sem_open("/my_clock_name", 0);
+	sem_t *rsrc_sem = sem_open("/my_resource_name", 0);
 
 	//initiallize rand generator
 	srand(my_pid);
@@ -58,9 +72,11 @@ int main ( int argc, char *argv[] ){
 
 	while (doing_it){
 	//Critical Section--------------------------------------------------------
-		sem_wait(&clk_sem_id);
-		if (cmp_timespecs(*clock, next_terminate_check) >= 0){
-		sem_post(&clk_sem_id);
+		sem_wait(clk_sem);
+		check = cmp_timespecs(*clock, next_terminate_check);
+		sem_post(clk_sem);
+		if (check >= 0){
+		
 			if (is_terminating()){
 			
 			/* DO stuff here to shut down*/
@@ -70,15 +86,37 @@ int main ( int argc, char *argv[] ){
 				plusEqualsTimeSpecs(&next_terminate_check, randTime(0, MAX_TIME_NEXT_TERM_CHECK));
 			}
 		}
-		else if (cmp_timespecs(*clock, next_resource_change) >= 0){
-		sem_post(&clk_sem_id);
+		if (cmp_timespecs(*clock, next_resource_change) >= 0){
+			//request or release
+			if ((rand() % 2) == 0){//request
+				success = 0;
+				r = rand() % 20; //which resource to request
+				for (i = 0; i < MAX_USERS; i++){
+					if (a_table[r].users_requesting[i][0] == my_pid){
+						(a_table[r].users_requesting[i][1])++;
+						success = 1;
+						break;
+					}
+				}
+				if (!success){
+					for (i = 0; i < MAX_USERS; i++){
+						if (a_table[r].users_requesting[i][0] == 0){
+							(a_table[r].users_requesting[i][1])++;
+							success = 1;
+							break;
+						}
+					}
+				}
 
-			/*Do stuff here to request resources*/
+			}
+			else{//release
+
+			}
+
+			/*Do stuff here to request rsrc_table*/
 
 		}
-		else(//spin wait
-		sem_post(&clk_sem_id);
-		)
+		
 		
 
 

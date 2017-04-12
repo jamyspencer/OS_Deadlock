@@ -1,5 +1,6 @@
-/* Written by Jamy Spencer 23 Feb 2017 */
+/* Written by Jamy Spencer 01 Apr 2017 */
 #include <errno.h>
+#include <semaphore.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,15 +11,19 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include "forkerlib.h"
 #include "obj.h"
+#include "timespeclib.h"
 
 
 void AbortProc();
 void AlarmHandler();
-
-int sem_key, sem_id;
-
+static sem_t *clk_sem, *rsrc_sem;
+static struct list* user_list;
+static struct timespec* sys_clock;
+static alloc_table_t* rsrc_table;
+static int shmid[2];
 
 int main ( int argc, char *argv[] ){
 
@@ -27,24 +32,24 @@ int main ( int argc, char *argv[] ){
 	mystats.child_count = 0;
 	mystats.total_spawned = 0;
 
-	file_name = "test.out";
+	char* file_name = "test.out";
 	int c, i, j;
 
 	int max_users = MAX_USERS;
-	int percent_interrupt = CHANCE_OF_INTERRUPT;
+	int max_time_next_rsrc_check = DEFAULT_TIME_NEXT_RSRC_CHECK;
+	char* child_arg = (char*) malloc(digit_quan(DEFAULT_TIME_NEXT_RSRC_CHECK) + 1);
+	sprintf(child_arg, "%lu", DEFAULT_TIME_NEXT_RSRC_CHECK);
 	int max_run_time = 20;
 	int quantum = QUANTUM;
-	int max_overhead = MAX_OVERHEAD;
+	int returning_child;
+	struct timespec when_next_fork = zeroTimeSpec();
 
-
-
-	struct timespec overhead;
 
 	signal(2, AbortProc);
 	signal(SIGALRM, AlarmHandler);
 	user_list = NULL;
 
-	while ( (c = getopt(argc, argv, "hi:l:m:o:q:t:")) != -1) {
+	while ( (c = getopt(argc, argv, "hl:m:q:r:t:")) != -1) {
 		switch(c){
 		case 'h':
 			printf("-h\tHelp Menu\n");
@@ -54,13 +59,6 @@ int main ( int argc, char *argv[] ){
 			printf("-q\tChanges the base quantum used by processes in nanoseconds(default is 4000000)\n");
 			printf("-t\tChanges the number of seconds to wait until the oss terminates all users and itself(default is 20)\n");
 			return 0;
-			break;
-		case 'i':
-			percent_interrupt = atoi(optarg);
-			if (percent_interrupt > 100 || percent_interrupt < 0){
-				printf("Error: Chance of interrupt must be between 0 and 100\n");
-				exit(1);
-			}
 			break;
 		case 'l':
 			file_name = optarg;
@@ -72,13 +70,6 @@ int main ( int argc, char *argv[] ){
 				max_users = MAX_USERS;
 			}
 			break;
-		case 'o':
-			max_overhead = atoi(optarg);
-			if (max_overhead < 0 || max_overhead > 5000000){
-				printf("Error: max overhead must be between 0-50000000");
-				exit(1);
-			}
-			break;
 		case 'q':
 			quantum = atoi(optarg);
 			if (quantum < 0 || quantum > BILLION){
@@ -86,10 +77,20 @@ int main ( int argc, char *argv[] ){
 				exit(1);
 			}
 			break;
+		case 'r':
+			max_time_next_rsrc_check = atoi(optarg);
+			if (max_time_next_rsrc_check > 10000 || max_time_next_rsrc_check < 0){
+				printf("Error: Time between resource checks must be between 0 and 10000\n");
+				exit(1);
+			}
+			else{
+				child_arg = optarg;
+			}
+			break;
 		case 't':
 			max_run_time = atoi(optarg);
 			if (max_run_time < 0){
-				printf("Error: maximum run-time cannot be a negative number");
+				printf("Error: maximum run-time cannot be a negative number\n");
 				exit(1);
 			}
 			break;
@@ -98,9 +99,10 @@ int main ( int argc, char *argv[] ){
 			break;
 		}
 	}
+	
 	alarm(max_run_time);
 
-	//clear log file_name
+	//clear log file
 	FILE* file_write = fopen(file_name, "w+");
 	fclose(file_write);
 
@@ -108,66 +110,74 @@ int main ( int argc, char *argv[] ){
 	srand(time(0));
 
 	//initialize semaphores
-	int clk_sem_key, rsrc_sem_key;
-	int clk_sem_id, rsrc_sem_id;
-	initializeSemaphore(&clk_sem_key, &rsrc_sem_key, &clk_sem_id, &rsrc_sem_id);
+	
+	if((clk_sem = sem_open("/my_clock_name", O_CREAT, 0666, 1)) == (void*)-1){
+		perror("clock semaphore creation failed");
+	}
+	if ((rsrc_sem = sem_open("/my_resource_name", O_CREAT, 0666, 1)) == (void*)-1){
+		perror("resource semaphore creation failed");
+	}
 
-	//initialize clock and array of resources in shared memory
-	int shmid[2];
-	struct timespec* clock;
-	resource_t* resources;
-	shrMemMakeAttach(shmid[], &resources, &clock);
-	*clock = zeroTimeSpec();
-	for (i = 0; i < 20; i++){
-		for (j = 0; j < MAX_USERS; j++) (resources + i)->users_requesting[j] = 0;
-		for (j = 0; j < MAX_USERS; j++) (resources + i)->users_granted[j] = 0;
+
+	//initialize sys_clock and array of rsrc_table in shared memory
+	shrMemMakeAttach(shmid, &rsrc_table, &sys_clock);
+	sys_clock->tv_sec = 0;
+	sys_clock->tv_nsec = 0;
+	for (i = 0; i < MAX_USERS; i++){
+		for (j = 0; j < 20; j++){
+			rsrc_table->users[i].rsrc_req[j] = 0;//i=user j=resource -requested
+			rsrc_table->users[i].rsrc_alloc[j] = 0;//i=user j=resource -allocated
+
+		}
 	}
 	int num_shared = (rand() % 2 + 1)+3;	
 	for (i = 0; i < num_shared; i++){
 		j = rand() % 10 + 1; //pick a number of instances of this resource
-		(resources + i)->quan = j;
-		(resources + i)->>num_available = j;
-
+		rsrc_table->rsrc_max[i] = j;
+		rsrc_table->rsrc_available[i] = j;
 	}
-	for (i; i < 20; i++){
-		(resources + i)->quan = 1;//these resources have only one instance(unshareable)
-		(resources + i)->>num_available = 1;
+	for (; i < 20; i++){
+		rsrc_table->rsrc_max[i] = 1;
+		rsrc_table->rsrc_available[i] = 1;
 	}
 
 	do{
-
+		//advance clock
+		sem_wait(clk_sem);
+		*sys_clock = addLongToTimespec(rand() % 800 + 600, sys_clock);
+		sem_post(clk_sem);
 
 		//Create new user if it is time.
-		if ((cmp_timespecs(*clock, when_next_fork) >= 0) && mystats.total_spawned < 100 && clock->tv_sec < 2 && mystats.child_count < max_users){
-
-			if (pcb_loc != -1){
-				user_list = MakeChild(user_list, control_blocks + pcb_loc, pcb_loc, *clock);
-				if (user_list == NULL){
-					perror("MakeChild failed");
-					AbortProc();			
-				}
-				mystats.total_spawned++;
-				mystats.child_count++;
-				SaveLog(file_name, (control_blocks + pcb_loc)->pid, *clock, 0, "create");
-				addLongToTimespec(rand() % MAX_SPAWN_DELAY + 1, &when_next_fork);
+		if ((cmp_timespecs(*sys_clock, when_next_fork) >= 0) && mystats.total_spawned < 100 && sys_clock->tv_sec < 2 && mystats.child_count < max_users){	
+			if (MakeChild(&user_list, *sys_clock, child_arg) == NULL){
+				perror("MakeChild failed");
+				AbortProc();			
 			}
+			mystats.total_spawned++;
+			mystats.child_count++;
+			addLongToTimespec(rand() % MAX_SPAWN_DELAY + 1, &when_next_fork);
 		}
+	
+		//Wait for returning users_granted
+		if ((returning_child = waitpid(-1, NULL, WNOHANG)) != 0){
 
-		sem_wait(&clk_sem_id);
+			if (returning_child != -1){
+				user_list = destroyNode(user_list, returning_child, file_name);
+//				printf("Child %d returned/removed\n", returning_child);
+				(mystats.child_count)--;
+			}
+	}
 
-		sem_post(&clk_sem_id)
-	}while(mystats.child_count > 0 || (clock->tv_sec < 2 && mystats.total_spawned < 100));
+	}while(mystats.child_count > 0 || (sys_clock->tv_sec < 2 && mystats.total_spawned < 100));
 
-	LogStats(file_name, mystats);
-
-	free(os_msg);
-	free(unlock);
-	free(user_msg);
-	msgctl(messenger, IPC_RMID, NULL);
-	shmdt(clock);
-	shmdt(control_blocks);
+	shmdt(sys_clock);
+	shmdt(rsrc_table);
 	shmctl(shmid[0], IPC_RMID, NULL);
 	shmctl(shmid[1], IPC_RMID, NULL);
+	sem_unlink("/my_clock_name");
+	sem_unlink("/my_resource_name");
+	sem_close(clk_sem);
+	sem_close(rsrc_sem);
 	return 0;
 }
 
@@ -177,15 +187,15 @@ void AlarmHandler(){
 }
 
 void AbortProc(){
-
-
 	kill(0, 2);
-	msgctl(messenger, IPC_RMID, NULL);
-	shmdt(control_blocks);
-	shmdt(clock);
+	sem_unlink("/my_clock_name");
+	sem_unlink("/my_resource_name");
+	sem_close(clk_sem);
+	sem_close(rsrc_sem);
+	shmdt(rsrc_table);
+	shmdt(sys_clock);
 	shmctl(shmid[1], IPC_RMID, NULL);
 	shmctl(shmid[0], IPC_RMID, NULL);
-	msgctl(messenger, IPC_RMID, NULL);
 	exit(1);
 }
 

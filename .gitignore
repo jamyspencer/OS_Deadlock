@@ -5,3 +5,8 @@
 oss
 user
 .~lock.Proj4.odt#
+.idea/misc.xml
+.idea/modules.xml
+.idea/spencer.5.iml
+.idea/workspace.xml
+CMakeLists.txt

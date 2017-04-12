@@ -1,4 +1,5 @@
-/* Written by Jamy Spencer 23 Feb 2017 */
+/* Written by Jamy Spencer 01 Apr 2017 */
+#include <semaphore.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -12,57 +13,49 @@
 
 
 
-void shrMemMakeAttach(int* shmid, pcb_t** resources, struct timespec** clock){
+void shrMemMakeAttach(int* shmid, alloc_table_t** a_table, struct timespec** clock){
 	/* make the key: */
 	int key[2];
 
-    if ((key[0] = ftok("main.c", 'R')) == -1) {
+    if ((key[0] = ftok("./main.c", 'R')) == -1) {
         perror("ftok");
         exit(1);
     }
-    if ((key[1] = ftok("slave.c", 'R')) == -1) {
+    if ((key[1] = ftok("./slave.c", 'R')) == -1) {
         perror("ftok");
         exit(1);
     }
     /* connect to (and possibly create) the shared clock segment: */
     if ((shmid[0] = shmget(key[0], sizeof(struct timespec), IPC_CREAT | 0644)) == -1) {
-        perror("shmget");
+        perror("shmget clock");
         exit(1);
     }
 
     /* connect to (and possibly create) the resource segment: */
-    if ((shmid[1] = shmget(key[0], sizeof(resource_t) * 20, IPC_CREAT | 0644)) == -1) {
-        perror("shmget");
+    if ((shmid[1] = shmget(key[1], sizeof(alloc_table_t), IPC_CREAT | 0644)) == -1) {
+        perror("shmget rsrc_table");
         exit(1);
     }
     /* attach to the segment to get a pointer to it: */
     *clock = shmat(shmid[0], (void*) NULL, 0);
-    if (*clock == (void *)(-1)) {
+    if (clock == (void*)(-1)) {
         perror("shmat clock");
         exit(1);
     }
-    *resources = shmat(shmid[1], (void*) NULL, 0);
-    if (*resources == (void *)(-1)) {
-        perror("shmat resources");
+    *a_table = shmat(shmid[1], (void*) NULL, 0);
+    if (a_table == (void*)(-1)) {
+        perror("shmat rsrc_table");
         exit(1);
     }
 	return;
 }
 
-void initializeSemaphore(int* clk_sem_key, int* rsrc_sem_key, int* clk_sem_id, int* rsrc_sem_id){
-    if ((*clk_sem_key = ftok("slave.c", 'C')) == -1) {
-        perror("ftok");
-        exit(1);
-    }
-    if ((*rsrc_sem_key = ftok("slave.c", 'D')) == -1) {
-        perror("ftok");
-        exit(1);
-    }
-	if ((*clk_sem_id = semget(*clk_sem_key, 0, IPC_CREAT|0666)) < 0) { 
-		perror("Semaphore creation failed ");
+void initializeSemaphore(sem_t* clk_sem, sem_t* rsrc_sem){
+	if (sem_init(clk_sem, 0, 1) == -1) { 
+		perror("sem_init of clk_sem: failed"); 
 	}
-	if ((*rsrc_sem_id = semget(*rsrc_sem_key, 0, IPC_CREAT|0666)) < 0) { 
-		perror("Semaphore creation failed ");
+	if (sem_init(rsrc_sem, 0, 1) == -1) { 
+		perror("sem_init of rsrc_sem: failed"); 
 	}
 }
 
@@ -71,11 +64,11 @@ long pwr(long n, long p){
 	return pwr(n, p-1) * n;
 }
 
-void log_mem_loc(pcb_t* addr, char* exec){
-	FILE* file_write = fopen("memlog.out", "a");
-	fprintf(file_write, "PID:%6d PCB: %03d", addr->pid, addr->pcb_loc); 
-	fprintf(file_write, " Memory  Address: %09x, Burst: %09lu, Executable: %s\n", &(*addr), addr->this_burst.tv_nsec, exec); 
-	fclose(file_write);
-	return;
+int digit_quan(long num){
+	int i;
+	for (i = 0; i < 100; i++)	{
+		if ((num - pwr(10, i)) < 0) return i;
+	}
+	return -1;
 }
 
