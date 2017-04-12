@@ -9,4 +9,5 @@ user
 .idea/modules.xml
 .idea/spencer.5.iml
 .idea/workspace.xml
+.idea/vcs.xml
 CMakeLists.txt
