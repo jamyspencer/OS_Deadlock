@@ -22,7 +22,7 @@ void AlarmHandler();
 static sem_t *clk_sem, *rsrc_sem;
 static struct list* user_list;
 static struct timespec* sys_clock;
-static alloc_table_t* rsrc_table;
+static consumer_t* a_table;
 static int shmid[2];
 
 int main ( int argc, char *argv[] ){
@@ -33,7 +33,7 @@ int main ( int argc, char *argv[] ){
 	mystats.total_spawned = 0;
 
 	char* file_name = "test.out";
-	int c, i, j;
+	int c, i, j, check;
 
 	int max_users = MAX_USERS;
 	int max_time_next_rsrc_check = DEFAULT_TIME_NEXT_RSRC_CHECK;
@@ -54,7 +54,7 @@ int main ( int argc, char *argv[] ){
 		case 'h':
 			printf("-h\tHelp Menu\n");
 			printf("-i\tChanges the chance that an interrupt will occur(default is 50)\n");
-			printf("-l\tSet log file name(default is test.out)\n-m\tChanges the number of user processes(default is 18)\n");
+			printf("-l\tSet log file name(default is test.out)\n-m\tChanges the number of consumer processes(default is 18)\n");
 			printf("-o\tChanges the maximum scheduling overhead in nanoseconds(default is 1000)\n");
 			printf("-q\tChanges the base quantum used by processes in nanoseconds(default is 4000000)\n");
 			printf("-t\tChanges the number of seconds to wait until the oss terminates all users and itself(default is 20)\n");
@@ -120,35 +120,37 @@ int main ( int argc, char *argv[] ){
 
 
 	//initialize sys_clock and array of rsrc_table in shared memory
-	shrMemMakeAttach(shmid, &rsrc_table, &sys_clock);
+	shrMemMakeAttach(shmid, &a_table, &sys_clock);
+	alloc_table_t rsrc_table;
 	sys_clock->tv_sec = 0;
 	sys_clock->tv_nsec = 0;
 	for (i = 0; i < MAX_USERS; i++){
+		a_table[i].pid = 0;
 		for (j = 0; j < 20; j++){
-			rsrc_table->users[i].rsrc_req[j] = 0;//i=user j=resource -requested
-			rsrc_table->users[i].rsrc_alloc[j] = 0;//i=user j=resource -allocated
-
+			a_table[i].rsrc_req[j] = 0;//i=consumer j=resource -requested
+			a_table[i].rsrc_alloc[j] = 0;//i=consumer j=resource -allocated
 		}
 	}
 	int num_shared = (rand() % 2 + 1)+3;	
 	for (i = 0; i < num_shared; i++){
 		j = rand() % 10 + 1; //pick a number of instances of this resource
-		rsrc_table->rsrc_max[i] = j;
-		rsrc_table->rsrc_available[i] = j;
+		rsrc_table.rsrc_max[i] = j;
+		rsrc_table.rsrc_available[i] = j;
 	}
 	for (; i < 20; i++){
-		rsrc_table->rsrc_max[i] = 1;
-		rsrc_table->rsrc_available[i] = 1;
+		rsrc_table.rsrc_max[i] = 1;
+		rsrc_table.rsrc_available[i] = 1;
 	}
 
 	do{
 		//advance clock
 		sem_wait(clk_sem);
-		*sys_clock = addLongToTimespec(rand() % 800 + 600, sys_clock);
+		*sys_clock = addLongToTimespec(rand() % 400, sys_clock);
+		check = cmp_timespecs(*sys_clock, when_next_fork);
 		sem_post(clk_sem);
 
 		//Create new user if it is time.
-		if ((cmp_timespecs(*sys_clock, when_next_fork) >= 0) && mystats.total_spawned < 100 && sys_clock->tv_sec < 2 && mystats.child_count < max_users){	
+		if (check >= 0 && mystats.total_spawned < 100 && sys_clock->tv_sec < 2 && mystats.child_count < max_users){
 			if (MakeChild(&user_list, *sys_clock, child_arg) == NULL){
 				perror("MakeChild failed");
 				AbortProc();			
@@ -158,11 +160,11 @@ int main ( int argc, char *argv[] ){
 			addLongToTimespec(rand() % MAX_SPAWN_DELAY + 1, &when_next_fork);
 		}
 	
-		//Wait for returning users_granted
+		//Wait for returning users
 		if ((returning_child = waitpid(-1, NULL, WNOHANG)) != 0){
 
 			if (returning_child != -1){
-				user_list = destroyNode(user_list, returning_child, file_name);
+				user_list = destroyNode(user_list, returning_child);
 //				printf("Child %d returned/removed\n", returning_child);
 				(mystats.child_count)--;
 			}
@@ -171,7 +173,7 @@ int main ( int argc, char *argv[] ){
 	}while(mystats.child_count > 0 || (sys_clock->tv_sec < 2 && mystats.total_spawned < 100));
 
 	shmdt(sys_clock);
-	shmdt(rsrc_table);
+	shmdt(a_table);
 	shmctl(shmid[0], IPC_RMID, NULL);
 	shmctl(shmid[1], IPC_RMID, NULL);
 	sem_unlink("/my_clock_name");
@@ -187,15 +189,16 @@ void AlarmHandler(){
 }
 
 void AbortProc(){
-	kill(0, 2);
+	KillUsers(user_list);
 	sem_unlink("/my_clock_name");
 	sem_unlink("/my_resource_name");
 	sem_close(clk_sem);
 	sem_close(rsrc_sem);
-	shmdt(rsrc_table);
+	shmdt(a_table);
 	shmdt(sys_clock);
 	shmctl(shmid[1], IPC_RMID, NULL);
 	shmctl(shmid[0], IPC_RMID, NULL);
+	kill(0, 2);
 	exit(1);
 }
 

@@ -31,10 +31,10 @@ struct list* PopProcess(struct list **queue_head);
 struct list* PushProcess(struct list* queue_head, struct list* process);
 struct list *MakeChild(struct list** head_ptr, struct timespec clock, char* arg);
 struct list *addNode(struct list** head_ptr);
-void KillSlaves(struct list *hd_ptr, char* file_name);
+void KillUsers(struct list *hd_ptr);
 struct list *returnTail(struct list *head_ptr);
-struct list* destroyNode(struct list *head_ptr, pid_t pid, char* file_name);
+struct list* destroyNode(struct list *head_ptr, pid_t pid);
 struct list* findNodeByPid(struct list *head_ptr, pid_t pid);
-void log(char* file_name, char* str);
+void Log(char* file_name, char* str);
 
 #endif

@@ -13,7 +13,7 @@
 
 
 
-void shrMemMakeAttach(int* shmid, alloc_table_t** a_table, struct timespec** clock){
+void shrMemMakeAttach(int* shmid, consumer_t** a_table, struct timespec** clock){
 	/* make the key: */
 	int key[2];
 
@@ -21,7 +21,7 @@ void shrMemMakeAttach(int* shmid, alloc_table_t** a_table, struct timespec** clo
         perror("ftok");
         exit(1);
     }
-    if ((key[1] = ftok("./slave.c", 'R')) == -1) {
+    if ((key[1] = ftok("./user.c", 'R')) == -1) {
         perror("ftok");
         exit(1);
     }
@@ -32,7 +32,7 @@ void shrMemMakeAttach(int* shmid, alloc_table_t** a_table, struct timespec** clo
     }
 
     /* connect to (and possibly create) the resource segment: */
-    if ((shmid[1] = shmget(key[1], sizeof(alloc_table_t), IPC_CREAT | 0644)) == -1) {
+    if ((shmid[1] = shmget(key[1], sizeof(consumer_t)*20, IPC_CREAT | 0644)) == -1) {
         perror("shmget rsrc_table");
         exit(1);
     }

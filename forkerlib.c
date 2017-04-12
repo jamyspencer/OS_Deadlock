@@ -70,7 +70,7 @@ struct list* findNodeByPid(struct list *head_ptr, pid_t pid){
 }
 
 //returns the head_ptr address of the list that now has the node containing the pid passed removed
-struct list* destroyNode(struct list *head_ptr, pid_t pid, char* file_name){
+struct list* destroyNode(struct list *head_ptr, pid_t pid){
 	struct list *temp = findNodeByPid(head_ptr, pid);
 	struct list *new_head;
 
@@ -106,13 +106,13 @@ struct list* destroyNode(struct list *head_ptr, pid_t pid, char* file_name){
 	return NULL;
 }
 
-void KillSlaves(struct list *head_ptr, char* file_name){
+void KillUsers(struct list *head_ptr){
 	while (head_ptr != NULL){	
 		kill(head_ptr->item.process_id, SIGKILL);
-		destroyNode(head_ptr, (head_ptr->item).process_id, file_name);	
+		destroyNode(head_ptr, (head_ptr->item).process_id);
 	}
 }
-void log(char* file_name, char* str){
+void Log(char* file_name, char* str){
 	FILE* file_write = fopen(file_name, "a");
 	fprintf(file_write,"%s", str);
 	fclose(file_write);

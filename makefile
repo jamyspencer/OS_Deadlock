@@ -5,7 +5,7 @@ DEBUG_ARGS=-g -Wall
 MAIN=oss
 SECONDARY=user
 OBJS1=main.o forkerlib.o obj.o timespeclib.o
-OBJS2=slave.o obj.o timespeclib.o
+OBJS2=user.o obj.o timespeclib.o
 DEPS=forkerlib.h  obj.h timespeclib.h
 
 all: $(MAIN) $(SECONDARY)
