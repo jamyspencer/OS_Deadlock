@@ -5,7 +5,7 @@
 #include <semaphore.h>
 #define MAX_USERS 18
 #define DEFAULT_TIME_NEXT_RSRC_CHECK 1000
-#define MAX_SPAWN_DELAY 20
+#define MAX_SPAWN_DELAY 200000
 #define BILLION 1000000000
 #define CHANCE_OF_TERMINATION 10
 #define QUANTUM 4000000
@@ -29,8 +29,7 @@ typedef struct queue_msg{
 } msg_t;
 
 
-void shrMemMakeAttach(int* shmid, consumer_t** a_table, struct timespec** clock);
-void initializeSemaphore(sem_t* clk_sem, sem_t* rsrc_sem);
+int shrMemMakeAttach(int* shmid, consumer_t** a_table, struct timespec** clock);
 long pwr(long n, long p);
 int digit_quan(long num);
 

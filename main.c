@@ -19,6 +19,8 @@
 
 void AbortProc();
 void AlarmHandler();
+void ReturnProcessResources(alloc_table_t sys_resources, pid_t pid);
+
 static sem_t *clk_sem, *rsrc_sem;
 static struct list* user_list;
 static struct timespec* sys_clock;
@@ -35,9 +37,10 @@ int main ( int argc, char *argv[] ){
 	char* file_name = "test.out";
 	int c, i, j, check;
 
-	int max_users = MAX_USERS;
+	int max_users = 5;
 	int max_time_next_rsrc_check = DEFAULT_TIME_NEXT_RSRC_CHECK;
 	char* child_arg = (char*) malloc(digit_quan(DEFAULT_TIME_NEXT_RSRC_CHECK) + 1);
+    char chr_buf[50];
 	sprintf(child_arg, "%lu", DEFAULT_TIME_NEXT_RSRC_CHECK);
 	int max_run_time = 20;
 	int quantum = QUANTUM;
@@ -119,7 +122,7 @@ int main ( int argc, char *argv[] ){
 	}
 
 
-	//initialize sys_clock and array of rsrc_table in shared memory
+	//initialize user_clock and array of rsrc_table in shared memory
 	shrMemMakeAttach(shmid, &a_table, &sys_clock);
 	alloc_table_t rsrc_table;
 	sys_clock->tv_sec = 0;
@@ -127,8 +130,8 @@ int main ( int argc, char *argv[] ){
 	for (i = 0; i < MAX_USERS; i++){
 		a_table[i].pid = 0;
 		for (j = 0; j < 20; j++){
-			a_table[i].rsrc_req[j] = 0;//i=consumer j=resource -requested
-			a_table[i].rsrc_alloc[j] = 0;//i=consumer j=resource -allocated
+			a_table[i].rsrc_req[j] = 1;//i=consumer j=resource -requested
+			a_table[i].rsrc_alloc[j] = 1;//i=consumer j=resource -allocated
 		}
 	}
 	int num_shared = (rand() % 2 + 1)+3;	
@@ -145,8 +148,9 @@ int main ( int argc, char *argv[] ){
 	do{
 		//advance clock
 		sem_wait(clk_sem);
-		*sys_clock = addLongToTimespec(rand() % 400, sys_clock);
+		*sys_clock = addLongToTimespec(rand() % 1200 + 100, sys_clock);
 		check = cmp_timespecs(*sys_clock, when_next_fork);
+ //       printf("MAIN: CLOCK: %02lu%09lu\n",user_clock->tv_sec, user_clock->tv_nsec);
 		sem_post(clk_sem);
 
 		//Create new user if it is time.
@@ -158,6 +162,29 @@ int main ( int argc, char *argv[] ){
 			mystats.total_spawned++;
 			mystats.child_count++;
 			addLongToTimespec(rand() % MAX_SPAWN_DELAY + 1, &when_next_fork);
+		}
+        //logging
+        for (i = 0; i < 20; i++){
+            sprintf(chr_buf, "RS:%2d AV:%d MX%d\n", i, rsrc_table.rsrc_available[i], rsrc_table.rsrc_max[i]);
+            Log(file_name, chr_buf);
+        }
+
+
+            //Check resource requests and grant/reclaim them if possible
+		for (i = 0; i < MAX_USERS; i++){
+			for (j = 0; j < 20; j++){
+				while (a_table[i].rsrc_req[j] > a_table[i].rsrc_alloc[j]){
+					if (rsrc_table.rsrc_available[j] > 0){
+						(a_table[i].rsrc_alloc[j])++;
+						(rsrc_table.rsrc_available[j])--;
+					}
+					else break;
+				}
+				while (a_table[i].rsrc_req[j] < a_table[i].rsrc_alloc[j]){
+					(a_table[i].rsrc_alloc[j])--;
+					(rsrc_table.rsrc_available[j])++;
+				}
+			}
 		}
 	
 		//Wait for returning users
@@ -172,6 +199,8 @@ int main ( int argc, char *argv[] ){
 
 	}while(mystats.child_count > 0 || (sys_clock->tv_sec < 2 && mystats.total_spawned < 100));
 
+    printf("exit conditions: child count:%d total:%d\n ", mystats.child_count, mystats.total_spawned);
+
 	shmdt(sys_clock);
 	shmdt(a_table);
 	shmctl(shmid[0], IPC_RMID, NULL);
@@ -181,6 +210,23 @@ int main ( int argc, char *argv[] ){
 	sem_close(clk_sem);
 	sem_close(rsrc_sem);
 	return 0;
+}
+
+void ReturnAllProcessResources(alloc_table_t sys_resources, pid_t pid){
+	int i,j;
+	for (i = 0; i < MAX_USERS; i++){
+		sem_wait(rsrc_sem);
+		if (a_table[i].pid == pid) {
+			for (j = 0; j < 20; j++) {
+				while (a_table[i].rsrc_alloc[j] > 0) {
+					(a_table[i].rsrc_alloc[j])--;
+					(sys_resources.rsrc_available[j])++;
+				}
+			}
+			break;
+		}
+		sem_post(rsrc_sem);
+	}
 }
 
 void AlarmHandler(){
@@ -201,5 +247,3 @@ void AbortProc(){
 	kill(0, 2);
 	exit(1);
 }
-
-

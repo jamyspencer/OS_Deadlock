@@ -13,51 +13,35 @@
 
 
 
-void shrMemMakeAttach(int* shmid, consumer_t** a_table, struct timespec** clock){
+int shrMemMakeAttach(int* shmid, consumer_t** a_table, struct timespec** clock){
 	/* make the key: */
-	int key[2];
+	int key[2] = {398290797, 398290798};
 
-    if ((key[0] = ftok("./main.c", 'R')) == -1) {
-        perror("ftok");
-        exit(1);
-    }
-    if ((key[1] = ftok("./user.c", 'R')) == -1) {
-        perror("ftok");
-        exit(1);
-    }
     /* connect to (and possibly create) the shared clock segment: */
-    if ((shmid[0] = shmget(key[0], sizeof(struct timespec), IPC_CREAT | 0644)) == -1) {
+    if ((shmid[0] = shmget(key[0], sizeof(struct timespec), IPC_CREAT | 0666)) == -1) {
         perror("shmget clock");
-        exit(1);
+        return 1;
     }
 
     /* connect to (and possibly create) the resource segment: */
-    if ((shmid[1] = shmget(key[1], sizeof(consumer_t)*20, IPC_CREAT | 0644)) == -1) {
+    if ((shmid[1] = shmget(key[1], sizeof(consumer_t)*20, IPC_CREAT | 0666)) == -1) {
         perror("shmget rsrc_table");
-        exit(1);
+        return 1;
     }
     /* attach to the segment to get a pointer to it: */
     *clock = shmat(shmid[0], (void*) NULL, 0);
     if (clock == (void*)(-1)) {
         perror("shmat clock");
-        exit(1);
+        return 1;
     }
     *a_table = shmat(shmid[1], (void*) NULL, 0);
     if (a_table == (void*)(-1)) {
         perror("shmat rsrc_table");
-        exit(1);
+        return 1;
     }
-	return;
+	return 0;
 }
 
-void initializeSemaphore(sem_t* clk_sem, sem_t* rsrc_sem){
-	if (sem_init(clk_sem, 0, 1) == -1) { 
-		perror("sem_init of clk_sem: failed"); 
-	}
-	if (sem_init(rsrc_sem, 0, 1) == -1) { 
-		perror("sem_init of rsrc_sem: failed"); 
-	}
-}
 
 long pwr(long n, long p){
 	if (p == 0){return 1;}
